@@ -1,0 +1,39 @@
+#include <stdint.h>
+
+#define RCC_Base        0x40023800
+#define RCC_AHB1ENR     (*(volatile uint32_t*)(RCC_Base + 0x30))
+
+#define GPIOA_Base      0x40020000
+#define GPIOA_MODER     (*(volatile uint32_t*)(GPIOA_Base + 0x00))
+#define GPIOA_OTYPER    (*(volatile uint32_t*)(GPIOA_Base + 0x04))
+#define GPIOA_OSPEEDR   (*(volatile uint32_t*)(GPIOA_Base + 0x08))
+#define GPIOA_ODR       (*(volatile uint32_t*)(GPIOA_Base + 0x14))
+
+#define GPIOB_Base      0x40020400
+#define GPIOB_MODER     (*(volatile uint32_t*)(GPIOB_Base + 0x00))
+#define GPIOB_PUPDR     (*(volatile uint32_t*)(GPIOB_Base + 0x0C))
+#define GPIOB_IDR       (*(volatile uint32_t*)(GPIOB_Base + 0x10))
+
+int main(void) {
+    RCC_AHB1ENR |= 0b11;   // เปิด clock ทั้ง GPIOA (bit0) และ GPIOB (bit1)
+
+    /* --- Setup PA5 LED --- */
+    GPIOA_MODER   &= ~(0b11 << 10);
+    GPIOA_MODER   |=  (0b01 << 10);
+    GPIOA_OTYPER  &= ~(0b1  << 5);
+    GPIOA_OSPEEDR &= ~(0b11 << 10);
+
+    /* --- Setup PB4 BTN --- */
+    GPIOB_MODER &= ~(0b11 << 8);   // PB4 = input
+    GPIOB_PUPDR &= ~(0b11 << 8);
+    GPIOB_PUPDR |=  (0b01 << 8);   // ตั้ง pull-up ให้ตรงกับวงจร
+
+    while (1) {
+        if ((GPIOB_IDR & (1 << 4)) == 0) {   // ปุ่มเป็น pull-up: กด=0
+            GPIOA_ODR |= (1 << 5);
+        } else {
+            GPIOA_ODR &= ~(1 << 5);
+        }
+    }
+    return 0;
+}
