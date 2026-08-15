@@ -722,3 +722,96 @@ Lab5 (5.1-5.3)  → Interrupt: UART RX, ADC EOC, EXTI ปุ่มกด (แท
 
 **ข้อสังเกตสำคัญสำหรับข้อสอบ:** สังเกตว่า Lab4.1-5.2 ใช้ pattern การตั้ง `SQR1_L`, `SQR3_SQ1`, `SMPR2` เหมือนกันทุกครั้งแค่เปลี่ยนเลข channel — และ UART ทุกแลปใช้ `BRR=139` เหมือนกันหมด (คือ baud 115200 ที่ 16MHz) จำสองค่านี้ไว้ให้แม่นเพราะจะได้ไม่ต้องคำนวณใหม่ตอนสอบ
 
+----------------------------------------------------------------------------------------
+# สรุป STM32F411RE Exam 1-4
+
+ทุกข้อใช้โครงสร้างเดียวกัน: **`RCC เปิด clock → config register → ใช้งานใน loop/ISR`**
+ไฟล์ `gpio.c` (output/input/write) ถูก reuse ในเกือบทุกข้อ
+
+---
+
+## Exam1 — 7-Segment + 3 ปุ่ม (EXTI)
+
+**โจทย์:** แสดง 0-9, PA10 เพิ่ม, PB3 ลด, PB5 รีเซ็ต, กดค้างไม่รัว, wrap-around
+
+**ไฟล์/หน้าที่:**
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `counter.c` | เก็บค่าตัวเลข 0-9 + `counter_increment/decrement/reset` (ทำ wrap-around) |
+| `sevenseg.c` | `sevenseg_display(n)` แปลงเลขเป็นสัญญาณ BCD 4 บิต (PC7/PA8/PB10/PA9) |
+| `exti.c` | ผูก PA10/PB3/PB5 กับ EXTI line 10/3/5, falling-edge only → ISR ยิงครั้งเดียวต่อการกด 1 ครั้ง (นี่คือกลไกที่ทำให้ "กดค้างไม่รัว") |
+
+**ถ้าโจทย์แก้:**
+- เปลี่ยน pin ปุ่ม/หลอด → แก้ `#define BTN_xxx_PIN` ใน `exti.c` หรือ `SEVENSEG_PIN_xx` ใน `sevenseg.c`
+- เปลี่ยนช่วงตัวเลข (เช่น 0-15) → แก้ `COUNTER_MAX_VALUE`, `COUNTER_WRAP_MOD` ใน `counter.c`
+- อยากให้กดค้างแล้วรันเร็วขึ้นเรื่อยๆ (auto-repeat) → ต้องเปลี่ยนจาก EXTI ล้วนเป็น polling+timer นับเวลากดค้างแทน
+
+---
+
+## Exam2 — LED Bar ตาม Potentiometer (ADC Polling)
+
+**โจทย์:** หมุนสุดตามเข็ม = ไฟดับหมด, หมุนทวนเข็ม = ไฟติดทีละดวง
+
+**ไฟล์/หน้าที่:**
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `adc.c` | `adc_read()` อ่านค่า pot จาก PA0 แบบ polling (รอ `EOC` flag) |
+| `ledbar.c` | `ledbar_calc_level()` แปลงค่า ADC → จำนวน LED ที่ต้องติด (0-4), `ledbar_update()` สั่งไฟ |
+
+**สูตรหลัก:** `level = (ADC_MAX - adc_value) / STEP_SIZE` → ADC สูง (หมุนสุดตามเข็ม) = level 0
+
+**ถ้าโจทย์แก้:**
+- เปลี่ยนจำนวน LED → แก้ `LEDBAR_NUM_LEDS` + array `gpx_ledPort`/`gu1_ledPin` ใน `ledbar.c`
+- ทิศทางหมุนกลับด้าน → สลับสูตรใน `ledbar_calc_level()` จาก `(ADC_MAX - adc)` เป็น `adc` เฉยๆ
+- เปลี่ยน pin potentiometer → แก้ `ADC_POT_CHANNEL`/`ADC_POT_GPIO_PIN` ใน `adc.c`
+
+---
+
+## Exam3 — UART Command → LED/Sensor
+
+**โจทย์:** รับตัวอักษรผ่าน UART สั่งงาน LED เปิด/ปิด และอ่านค่า sensor (อุณหภูมิ/แสง)
+
+**ไฟล์/หน้าที่:**
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `uart.c` | TX/RX polling บน USART2 (PA2/PA3), baud 115200 |
+| `adc.c` | `adc_read_channel(ch)` เลือก channel ได้ (0=อุณหภูมิ, 1=แสง) |
+| `sensors.c` | คำนวณอุณหภูมิ (NTC Beta equation) และแสง (LDR log-log) จากค่า ADC |
+| `leds.c` | `leds_turn_on/off()` คุม Blue/Red/Yellow พร้อมกัน |
+| `main.c` | `handle_command()` เป็น `switch-case` แปลตัวอักษรที่รับมาเป็นการกระทำ — **จุดศูนย์กลางของโปรแกรมทั้งหมด** |
+
+**ถ้าโจทย์แก้:**
+- เพิ่ม/เปลี่ยนตัวอักษรคำสั่ง หรือข้อความที่พิมพ์ → แก้ที่ `switch (u1_command)` ใน `main.c` เท่านั้น (โครงสร้างอื่นไม่ต้องแตะ)
+- สูตรคำนวณ sensor ผิด/ค่าคงที่ผิด → แก้ `#define` ค่าคงที่ (NTC_BETA, LDR_SLOPE ฯลฯ) ใน `sensors.c`
+- เปลี่ยน pin LED → แก้ `#define LED_xxx_PIN` ใน `leds.c`
+- อยากให้ non-blocking (ไม่ค้างรอ UART) → เปลี่ยน `uart_receive_char()` เป็น interrupt-driven (แบบ Lab5.1)
+
+---
+
+## Exam4 — PWM Brightness ตาม Potentiometer (ADC EOC Interrupt)
+
+**โจทย์:** หมุนสุดทวนเข็ม = ไฟดับ, หมุนตามเข็ม = ไฟค่อยๆสว่างขึ้น, **ต้องใช้ ADC EOC interrupt**
+
+**ไฟล์/หน้าที่:**
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `adc.c` | เปิด `EOCIE` + `NVIC_EnableIRQ(ADC_IRQn)` → `ADC_IRQHandler()` อ่านค่าเมื่อแปลงเสร็จ (**นี่คือจุดตอบโจทย์ข้อ interrupt**) |
+| `brightness.c` | `brightness_update_from_adc()` แปลงค่า ADC → duty % แล้วสั่ง PWM (เรียกจากใน ISR) |
+| `pwm.c` | TIM3 CH1/CH2/CH3 (PA6/PA7/PB0) สร้างสัญญาณ PWM 1kHz, `pwm_set_duty_percent()` ปรับความสว่าง |
+| `main.c` | แค่เรียก `adc_start_conversion()` วนซ้ำ — งานจริงอยู่ใน ISR ทั้งหมด |
+
+**Flow:** `main()` trigger conversion → ฮาร์ดแวร์แปลงเสร็จ → EOC interrupt → อ่านค่า → คำนวณ duty → สั่ง PWM
+
+**ถ้าโจทย์แก้:**
+- ทิศทางหมุนกลับด้าน (สุดตามเข็ม=ดับ) → แก้สูตรใน `brightness_update_from_adc()` จาก `adc_value` เป็น `(ADC_MAX - adc_value)`
+- เปลี่ยนความถี่ PWM → แก้ `PWM_ARR_VALUE`/`PWM_PSC_VALUE` ใน `pwm.c`
+- ใช้ LED ดวงเดียวแทน 3 ดวง → ลบ channel 2/3 ออกจาก `pwm_init()`/`pwm_set_duty_percent()`
+- ถ้าโจทย์ห้ามใช้ interrupt (กลับไป polling) → ลบ `EOCIE`/`NVIC_EnableIRQ`/`ADC_IRQHandler` ออก แล้วใช้ `while((ADC1->SR & ADC_SR_EOC)==0)` แทนใน loop
+
+---
+
+## จุดร่วมที่ต้องระวังทุกข้อ
+
+1. **ลืมเปิด clock (`RCC->...EN`)** ก่อน config peripheral คือบั๊กที่พบบ่อยที่สุด
+2. **Pin mapping** (LED/ปุ่ม/ADC channel/UART/Timer AF) ต้องตรวจกับบอร์ดจริงเสมอ ก่อนโค้ดจะทำงานถูก
+3. **MISRA:** comment `/* */`, ทุก `if` มี `else`, ทุกตัวแปร init ค่าตอนประกาศ, ไม่มี magic number ลอยๆ (ใช้ `#define`)
